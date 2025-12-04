@@ -1,0 +1,6 @@
+{
+    "name": "yourname/grade-remarks",
+    "require": {
+        "php-ai/php-ml": "^0.10.0"
+    }
+}
