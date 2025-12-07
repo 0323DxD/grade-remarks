@@ -167,12 +167,12 @@ button[type="submit"]:hover {
 table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.875rem;
+  font-size: 0.75rem;
 }
 
 th {
   text-align: left;
-  padding: 1rem;
+  padding: 0.5rem;
   background-color: #f8fafc;
   color: var(--text-muted);
   font-weight: 600;
@@ -180,7 +180,7 @@ th {
 }
 
 td {
-  padding: 1rem;
+  padding: 0.5rem;
   border-bottom: 1px solid var(--border);
   color: var(--text-main);
 }

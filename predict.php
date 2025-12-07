@@ -12,6 +12,7 @@ $scalerFile = __DIR__ . '/model/scaler.json';
 $predictedRemark = '';
 $error = '';
 $inputValues = [
+    'student_name' => '',
     'numeric_grade' => '',
     'attendance_pct' => '',
     'assignment_avg' => '',
@@ -29,13 +30,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if (isset($_POST['numeric_grade'])) {
+        $inputValues['student_name'] = isset($_POST['student_name']) ? trim($_POST['student_name']) : '';
         $inputValues['numeric_grade'] = isset($_POST['numeric_grade']) ? floatval($_POST['numeric_grade']) : null;
         $inputValues['attendance_pct'] = isset($_POST['attendance_pct']) ? floatval($_POST['attendance_pct']) : null;
         $inputValues['assignment_avg'] = isset($_POST['assignment_avg']) ? floatval($_POST['assignment_avg']) : null;
         $inputValues['exam_score'] = isset($_POST['exam_score']) ? floatval($_POST['exam_score']) : null;
 
         foreach ($inputValues as $k => $v) {
-            if ($v === null || $v === '') {
+            if ($k !== 'student_name' && ($v === null || $v === '')) {
                 $error = 'Enter valid numeric values for all fields.';
                 break;
             }
@@ -76,12 +78,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $totalGrade = ($inputValues['numeric_grade'] + $inputValues['assignment_avg'] + $inputValues['exam_score']) / 3;
 
                     // Save to DB
-                    $stmt = $pdo->prepare('INSERT INTO predictions (numeric_grade, attendance_pct, assignment_avg, exam_score, predicted_remark) VALUES (:g, :a, :asgn, :e, :r)');
+                    $stmt = $pdo->prepare('INSERT INTO predictions (student_name, numeric_grade, attendance_pct, assignment_avg, exam_score, total_grade, predicted_remark) VALUES (:name, :g, :a, :asgn, :e, :t, :r)');
                     $stmt->execute([
+                        ':name' => $inputValues['student_name'],
                         ':g' => $sample[0],
                         ':a' => $sample[1],
                         ':asgn' => $sample[2],
                         ':e' => $sample[3],
+                        ':t' => $totalGrade,
                         ':r' => $predictedRemark,
                     ]);
 
@@ -145,6 +149,13 @@ if (isset($_SESSION['predicted_remark'])) {
 
         <form method="post" action="predict.php">
             <div class="form-group">
+                <label for="student_name">Student Name</label>
+                <input type="text" id="student_name" name="student_name" 
+                       value="<?= htmlspecialchars($inputValues['student_name']) ?>" placeholder="e.g. John Doe" 
+                       style="width: 100%; padding: 0.75rem 1rem; border-radius: 0.5rem; border: 1px solid var(--border); font-family: inherit; font-size: 1rem; background: #f8fafc;" required>
+            </div>
+
+            <div class="form-group">
                 <label for="numeric_grade">Numeric Grade (0-100)</label>
                 <input type="number" id="numeric_grade" name="numeric_grade" step="0.01" min="0" max="100" 
                        value="<?= htmlspecialchars($inputValues['numeric_grade']) ?>" placeholder="e.g. 85.5" required>
@@ -179,31 +190,37 @@ if (isset($_SESSION['predicted_remark'])) {
         
         <div class="table-container">
             <?php
+            // Check if column exists to avoid error if SQL not run yet
+            // This is a quick fix, ideally we trust the user ran the SQL
             $results = $pdo->query('SELECT * FROM predictions ORDER BY created_at DESC LIMIT 15')->fetchAll();
             if ($results):
             ?>
             <table>
                 <thead>
                     <tr>
-                        <th>ID</th>
+                        <th>Name</th>
                         <th>Grade</th>
-                        <th>Attendance</th>
-                        <th>Assignments</th>
+                        <th>Attd</th>
+                        <th>Asgn</th>
                         <th>Exam</th>
                         <th>Total</th>
                         <th>Remark</th>
-                        <th>Time</th>
                         <th>Action</th>
                     </tr>
                 </thead>
                 <tbody>
                     <?php foreach ($results as $r): ?>
                     <?php 
-                        // Calculate Total on the fly
-                        $rowTotal = ($r['numeric_grade'] + $r['assignment_avg'] + $r['exam_score']) / 3; 
+                        // Use stored total_grade if available, otherwise calculate it (for old records)
+                        if (isset($r['total_grade']) && $r['total_grade'] !== null) {
+                            $rowTotal = $r['total_grade'];
+                        } else {
+                            $rowTotal = ($r['numeric_grade'] + $r['assignment_avg'] + $r['exam_score']) / 3; 
+                        }
+                        $name = isset($r['student_name']) ? $r['student_name'] : '-';
                     ?>
                     <tr>
-                        <td><?= $r['id'] ?></td>
+                        <td><?= htmlspecialchars($name) ?></td>
                         <td><?= $r['numeric_grade'] ?></td>
                         <td><?= $r['attendance_pct'] ?>%</td>
                         <td><?= $r['assignment_avg'] ?></td>
@@ -214,11 +231,10 @@ if (isset($_SESSION['predicted_remark'])) {
                                 <?= htmlspecialchars($r['predicted_remark']) ?>
                             </span>
                         </td>
-                        <td><?= date('M j, H:i', strtotime($r['created_at'])) ?></td>
                         <td>
                             <form method="post" action="predict.php" onsubmit="return confirm('Are you sure?');" style="display:inline;">
                                 <input type="hidden" name="delete_id" value="<?= $r['id'] ?>">
-                                <button type="submit" style="background:none; border:none; color:var(--danger); cursor:pointer; padding:0; font-size:0.875rem; font-weight:600;">Remove</button>
+                                <button type="submit" style="background:none; border:none; color:var(--danger); cursor:pointer; padding:0; font-size:0.75rem; font-weight:600;">Remove</button>
                             </form>
                         </td>
                     </tr>
