@@ -13,27 +13,29 @@ $predictedRemark = '';
 $error = '';
 $inputValues = [
     'student_name' => '',
-    'numeric_grade' => '',
+    'student_behavior' => '',
     'attendance_pct' => '',
     'assignment_avg' => '',
+    'quiz_score' => '',
     'exam_score' => ''
 ];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (isset($_POST['delete_id'])) {
         $deleteId = (int)$_POST['delete_id'];
-        $stmt = $pdo->prepare('DELETE FROM predictions WHERE id = :id');
+        $stmt = $pdo->prepare('DELETE FROM generator WHERE id = :id');
         $stmt->execute([':id' => $deleteId]);
         // Redirect to avoid resubmission
-        header("Location: predict.php");
+        header("Location: index.php");
         exit;
     }
 
-    if (isset($_POST['numeric_grade'])) {
+    if (isset($_POST['student_behavior'])) {
         $inputValues['student_name'] = isset($_POST['student_name']) ? trim($_POST['student_name']) : '';
-        $inputValues['numeric_grade'] = isset($_POST['numeric_grade']) ? floatval($_POST['numeric_grade']) : null;
+        $inputValues['student_behavior'] = isset($_POST['student_behavior']) ? floatval($_POST['student_behavior']) : null;
         $inputValues['attendance_pct'] = isset($_POST['attendance_pct']) ? floatval($_POST['attendance_pct']) : null;
         $inputValues['assignment_avg'] = isset($_POST['assignment_avg']) ? floatval($_POST['assignment_avg']) : null;
+        $inputValues['quiz_score'] = isset($_POST['quiz_score']) ? floatval($_POST['quiz_score']) : null;
         $inputValues['exam_score'] = isset($_POST['exam_score']) ? floatval($_POST['exam_score']) : null;
 
         foreach ($inputValues as $k => $v) {
@@ -56,44 +58,67 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $stds  = $scaler['stds'];
 
                     // Build sample in same order used for training
+                    // Features: Behavior, Attendance, Assignment, Quiz, Exam
                     $sample = [
-                        floatval($inputValues['numeric_grade']),
+                        floatval($inputValues['student_behavior']),
                         floatval($inputValues['attendance_pct']),
                         floatval($inputValues['assignment_avg']),
+                        floatval($inputValues['quiz_score']),
                         floatval($inputValues['exam_score'])
                     ];
 
                     // Normalize: (x - mean) / std
                     $normSample = [];
-                    for ($j = 0; $j < count($sample); $j++) {
-                        $normSample[] = ($sample[$j] - $means[$j]) / $stds[$j];
+                    // Check if feature count matches to avoid offset error
+                    if (count($sample) !== count($means)) {
+                         $error = 'Model mismatch: Feature count changed. Please RETRAIN the model.';
+                    } else {
+                        for ($j = 0; $j < count($sample); $j++) {
+                            $normSample[] = ($sample[$j] - $means[$j]) / $stds[$j];
+                        }
                     }
 
-                    // Predict
-                    $prediction = $estimator->predict([$normSample]);
-                    $predictedRemark = is_array($prediction) ? $prediction[0] : $prediction;
+                    if (empty($error)) {
+                        // Predict
+                        $prediction = $estimator->predict([$normSample]);
+                        $predictedRemark = is_array($prediction) ? $prediction[0] : $prediction;
 
-                    // Calculate Total Grade (Simple Average of Academic Scores)
-                    // Formula: (Numeric Grade + Assignment + Exam) / 3
-                    $totalGrade = ($inputValues['numeric_grade'] + $inputValues['assignment_avg'] + $inputValues['exam_score']) / 3;
+                        // Feedback Messages
+                        $feedbackMap = [
+                            'Excellent' => ['Outstanding performance.', 'Shows mastery of concepts.', 'Consistently excellent work.', 'Exceptional effort and creativity.'],
+                            'Very Good' => ['Strong performance with only minor errors.', 'Demonstrates clear understanding.', 'Well done, keep it up.'],
+                            'Good' => ['Solid effort.', 'Meets expectations.', 'Shows steady progress.', 'Reliable and consistent work.'],
+                            'Average' => ['Adequate performance.', 'Meets minimum requirements.', 'Needs improvement in some areas.', 'Satisfactory but room for growth.'],
+                            'Fair' => ['Basic understanding.', 'Struggles with consistency.', 'Requires guidance and more practice.'],
+                            'Poor' => ['Limited understanding.', 'Frequent errors.', 'Needs significant improvement.', 'Shows lack of effort.'],
+                        ];
 
-                    // Save to DB
-                    $stmt = $pdo->prepare('INSERT INTO predictions (student_name, numeric_grade, attendance_pct, assignment_avg, exam_score, total_grade, predicted_remark) VALUES (:name, :g, :a, :asgn, :e, :t, :r)');
-                    $stmt->execute([
-                        ':name' => $inputValues['student_name'],
-                        ':g' => $sample[0],
-                        ':a' => $sample[1],
-                        ':asgn' => $sample[2],
-                        ':e' => $sample[3],
-                        ':t' => $totalGrade,
-                        ':r' => $predictedRemark,
-                    ]);
+                        $feedbackMsg = '';
+                        if (isset($feedbackMap[$predictedRemark])) {
+                            $msgs = $feedbackMap[$predictedRemark];
+                            $feedbackMsg = $msgs[array_rand($msgs)];
+                        }
 
-                    // Store result in session and redirect to prevent resubmission
-                    $_SESSION['predicted_remark'] = $predictedRemark;
-                    $_SESSION['total_grade'] = $totalGrade;
-                    header("Location: predict.php");
-                    exit;
+                        // Save to DB
+                        $stmt = $pdo->prepare('INSERT INTO generator (student_name, student_behavior, attendance_pct, assignment_avg, quiz_score, exam_score, total_grade, predicted_remark) VALUES (:name, :b, :a, :asgn, :q, :e, :t, :r)');
+                        $stmt->execute([
+                            ':name' => $inputValues['student_name'],
+                            ':b' => $sample[0],
+                            ':a' => $sample[1],
+                            ':asgn' => $sample[2],
+                            ':q' => $sample[3],
+                            ':e' => $sample[4],
+                            ':t' => $totalGrade,
+                            ':r' => $predictedRemark,
+                        ]);
+
+                        // Store result in session and redirect to prevent resubmission
+                        $_SESSION['predicted_remark'] = $predictedRemark;
+                        $_SESSION['total_grade'] = $totalGrade;
+                        $_SESSION['feedback_msg'] = $feedbackMsg;
+                        header("Location: index.php");
+                        exit;
+                    }
                 }
             }
         }
@@ -104,8 +129,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 if (isset($_SESSION['predicted_remark'])) {
     $predictedRemark = $_SESSION['predicted_remark'];
     $totalGrade = isset($_SESSION['total_grade']) ? $_SESSION['total_grade'] : null;
+    $feedbackMsg = isset($_SESSION['feedback_msg']) ? $_SESSION['feedback_msg'] : '';
     unset($_SESSION['predicted_remark']);
     unset($_SESSION['total_grade']);
+    unset($_SESSION['feedback_msg']);
 }
 ?>
 <!doctype html>
@@ -137,28 +164,33 @@ if (isset($_SESSION['predicted_remark'])) {
 
         <?php if ($predictedRemark): ?>
             <div class="result-box">
-                <div class="result-label">Predicted Remark</div>
+                <div class="result-label">Generated Remark</div>
                 <div class="result-value"><?= htmlspecialchars($predictedRemark) ?></div>
+                <?php if ($feedbackMsg): ?>
+                    <div style="margin-top: 5px; font-size: 1rem; color: var(--primary); font-style: italic;">
+                        "<?= htmlspecialchars($feedbackMsg) ?>"
+                    </div>
+                <?php endif; ?>
                 <?php if (isset($totalGrade)): ?>
-                    <div style="margin-top: 10px; font-size: 1.2rem; color: var(--text-muted);">
+                    <div style="margin-top: 15px; font-size: 1.2rem; color: var(--text-muted);">
                         Total Grade: <strong><?= number_format($totalGrade, 2) ?></strong>
                     </div>
                 <?php endif; ?>
             </div>
         <?php endif; ?>
 
-        <form method="post" action="predict.php">
+        <form method="post" action="index.php">
             <div class="form-group">
                 <label for="student_name">Student Name</label>
                 <input type="text" id="student_name" name="student_name" 
-                       value="<?= htmlspecialchars($inputValues['student_name']) ?>" placeholder="e.g. John Doe" 
+                       value="<?= htmlspecialchars($inputValues['student_name']) ?>" placeholder="e.g. Pogi Aguiluz" 
                        style="width: 100%; padding: 0.75rem 1rem; border-radius: 0.5rem; border: 1px solid var(--border); font-family: inherit; font-size: 1rem; background: #f8fafc;" required>
             </div>
 
             <div class="form-group">
-                <label for="numeric_grade">Numeric Grade (0-100)</label>
-                <input type="number" id="numeric_grade" name="numeric_grade" step="0.01" min="0" max="100" 
-                       value="<?= htmlspecialchars($inputValues['numeric_grade']) ?>" placeholder="e.g. 85.5" required>
+                <label for="student_behavior">Student Behavior (0-100)</label>
+                <input type="number" id="student_behavior" name="student_behavior" step="0.01" min="0" max="100" 
+                       value="<?= htmlspecialchars($inputValues['student_behavior']) ?>" placeholder="e.g. 85.5" required>
             </div>
 
             <div class="form-group">
@@ -174,34 +206,48 @@ if (isset($_SESSION['predicted_remark'])) {
             </div>
 
             <div class="form-group">
+                <label for="quiz_score">Quiz Score (0-100)</label>
+                <input type="number" id="quiz_score" name="quiz_score" step="0.01" min="0" max="100" 
+                       value="<?= htmlspecialchars($inputValues['quiz_score']) ?>" placeholder="e.g. 75" required>
+            </div>
+
+            <div class="form-group">
                 <label for="exam_score">Exam Score (0-100)</label>
                 <input type="number" id="exam_score" name="exam_score" step="0.01" min="0" max="100" 
                        value="<?= htmlspecialchars($inputValues['exam_score']) ?>" placeholder="e.g. 92" required>
             </div>
 
-            <button type="submit">Generate Prediction</button>
+            <button type="submit">Generate Grade</button>
         </form>
     </div>
 
     <div class="card">
         <div class="card-header">
-            <h2 class="card-title">Recent Predictions</h2>
+            <h2 class="card-title">Recent Grades</h2>
         </div>
         
         <div class="table-container">
             <?php
             // Check if column exists to avoid error if SQL not run yet
             // This is a quick fix, ideally we trust the user ran the SQL
-            $results = $pdo->query('SELECT * FROM predictions ORDER BY created_at DESC LIMIT 15')->fetchAll();
+            try {
+                // Attempt to select from 'generator'
+                $results = $pdo->query('SELECT * FROM generator ORDER BY created_at DESC LIMIT 15')->fetchAll();
+            } catch (Exception $e) {
+                // Fallback or empty if table doesn't exist yet
+                $results = [];
+            }
+
             if ($results):
             ?>
             <table>
                 <thead>
                     <tr>
-                        <th>Name</th>
-                        <th>Grade</th>
-                        <th>Attd</th>
-                        <th>Asgn</th>
+                        <th>Student Name</th>
+                        <th>Behavior</th>
+                        <th>Attendance</th>
+                        <th>Assignment</th>
+                        <th>Quiz</th>
                         <th>Exam</th>
                         <th>Total</th>
                         <th>Remark</th>
@@ -215,15 +261,22 @@ if (isset($_SESSION['predicted_remark'])) {
                         if (isset($r['total_grade']) && $r['total_grade'] !== null) {
                             $rowTotal = $r['total_grade'];
                         } else {
-                            $rowTotal = ($r['numeric_grade'] + $r['assignment_avg'] + $r['exam_score']) / 3; 
+                            // Fallback for old data might be tricky since columns changed
+                            // Use 0 if key missing
+                            $quizObj = isset($r['quiz_score']) ? $r['quiz_score'] : 0;
+                            $rowTotal = ($quizObj + $r['assignment_avg'] + $r['exam_score']) / 3; 
                         }
                         $name = isset($r['student_name']) ? $r['student_name'] : '-';
+                        // Handle column rename for display
+                        $behav = isset($r['student_behavior']) ? $r['student_behavior'] : (isset($r['numeric_grade']) ? $r['numeric_grade'] : '-');
+                        $quizVal = isset($r['quiz_score']) ? $r['quiz_score'] : '-';
                     ?>
                     <tr>
                         <td><?= htmlspecialchars($name) ?></td>
-                        <td><?= $r['numeric_grade'] ?></td>
+                        <td><?= $behav ?></td>
                         <td><?= $r['attendance_pct'] ?>%</td>
                         <td><?= $r['assignment_avg'] ?></td>
+                        <td><?= $quizVal ?></td>
                         <td><?= $r['exam_score'] ?></td>
                         <td><strong><?= number_format($rowTotal, 2) ?></strong></td>
                         <td>
@@ -232,7 +285,7 @@ if (isset($_SESSION['predicted_remark'])) {
                             </span>
                         </td>
                         <td>
-                            <form method="post" action="predict.php" onsubmit="return confirm('Are you sure?');" style="display:inline;">
+                            <form method="post" action="index.php" onsubmit="return confirm('Are you sure?');" style="display:inline;">
                                 <input type="hidden" name="delete_id" value="<?= $r['id'] ?>">
                                 <button type="submit" style="background:none; border:none; color:var(--danger); cursor:pointer; padding:0; font-size:0.75rem; font-weight:600;">Remove</button>
                             </form>
@@ -242,7 +295,7 @@ if (isset($_SESSION['predicted_remark'])) {
                 </tbody>
             </table>
             <?php else: ?>
-            <p style="text-align: center; color: var(--text-muted);">No predictions recorded yet.</p>
+            <p style="text-align: center; color: var(--text-muted);">No predictions recorded yet (or table 'generator' not found).</p>
             <?php endif; ?>
         </div>
     </div>

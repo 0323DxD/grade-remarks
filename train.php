@@ -6,7 +6,7 @@ use Phpml\Classification\KNearestNeighbors;
 use Phpml\ModelManager;
 
 // Fetch training data
-$rows = $pdo->query('SELECT numeric_grade, attendance_pct, assignment_avg, exam_score, remark FROM training_data')->fetchAll();
+$rows = $pdo->query('SELECT student_behavior, attendance_pct, assignment_avg, quiz_score, exam_score, remark FROM training_data')->fetchAll();
 
 if (!$rows || count($rows) < 3) {
     echo "Need at least 3 training rows in training_data table. Add more sample rows and retry.\n";
@@ -19,9 +19,10 @@ $labels = [];
 
 foreach ($rows as $r) {
     $samples[] = [
-        (float)$r['numeric_grade'],
+        (float)$r['student_behavior'],
         (float)$r['attendance_pct'],
         (float)$r['assignment_avg'],
+        (float)$r['quiz_score'],
         (float)$r['exam_score'],
     ];
     $labels[] = $r['remark'];
