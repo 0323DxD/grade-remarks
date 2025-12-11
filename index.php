@@ -9,7 +9,7 @@ $modelManager = new ModelManager();
 $modelFile = __DIR__ . '/model/grade-model.phpml';
 $scalerFile = __DIR__ . '/model/scaler.json';
 
-$predictedRemark = '';
+$gradedRemark = '';
 $error = '';
 $inputValues = [
     'student_name' => '',
@@ -81,7 +81,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     if (empty($error)) {
                         // Predict
                         $prediction = $estimator->predict([$normSample]);
-                        $predictedRemark = is_array($prediction) ? $prediction[0] : $prediction;
+                        $gradedRemark = is_array($prediction) ? $prediction[0] : $prediction;
 
                         // Feedback Messages
                         $feedbackMap = [
@@ -94,13 +94,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         ];
 
                         $feedbackMsg = '';
-                        if (isset($feedbackMap[$predictedRemark])) {
-                            $msgs = $feedbackMap[$predictedRemark];
+                        if (isset($feedbackMap[$gradedRemark])) {
+                            $msgs = $feedbackMap[$gradedRemark];
                             $feedbackMsg = $msgs[array_rand($msgs)];
                         }
 
                         // Save to DB
-                        $stmt = $pdo->prepare('INSERT INTO generator (student_name, student_behavior, attendance_pct, assignment_avg, quiz_score, exam_score, total_grade, predicted_remark) VALUES (:name, :b, :a, :asgn, :q, :e, :t, :r)');
+                        $stmt = $pdo->prepare('INSERT INTO generator (student_name, student_behavior, attendance_pct, assignment_avg, quiz_score, exam_score, total_grade, graded_remark) VALUES (:name, :b, :a, :asgn, :q, :e, :t, :r)');
                         $stmt->execute([
                             ':name' => $inputValues['student_name'],
                             ':b' => $sample[0],
@@ -109,11 +109,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             ':q' => $sample[3],
                             ':e' => $sample[4],
                             ':t' => $totalGrade,
-                            ':r' => $predictedRemark,
+                            ':r' => $gradedRemark,
                         ]);
 
                         // Store result in session and redirect to prevent resubmission
-                        $_SESSION['predicted_remark'] = $predictedRemark;
+                        $_SESSION['graded_remark'] = $gradedRemark;
                         $_SESSION['total_grade'] = $totalGrade;
                         $_SESSION['feedback_msg'] = $feedbackMsg;
                         header("Location: index.php");
@@ -126,11 +126,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 // Check for flash message from session
-if (isset($_SESSION['predicted_remark'])) {
-    $predictedRemark = $_SESSION['predicted_remark'];
+if (isset($_SESSION['graded_remark'])) {
+    $gradedRemark = $_SESSION['graded_remark'];
     $totalGrade = isset($_SESSION['total_grade']) ? $_SESSION['total_grade'] : null;
     $feedbackMsg = isset($_SESSION['feedback_msg']) ? $_SESSION['feedback_msg'] : '';
-    unset($_SESSION['predicted_remark']);
+    unset($_SESSION['graded_remark']);
     unset($_SESSION['total_grade']);
     unset($_SESSION['feedback_msg']);
 }
@@ -162,10 +162,10 @@ if (isset($_SESSION['predicted_remark'])) {
             </div>
         <?php endif; ?>
 
-        <?php if ($predictedRemark): ?>
+        <?php if ($gradedRemark): ?>
             <div class="result-box">
                 <div class="result-label">Generated Remark</div>
-                <div class="result-value"><?= htmlspecialchars($predictedRemark) ?></div>
+                <div class="result-value"><?= htmlspecialchars($gradedRemark) ?></div>
                 <?php if ($feedbackMsg): ?>
                     <div style="margin-top: 5px; font-size: 1rem; color: var(--primary); font-style: italic;">
                         "<?= htmlspecialchars($feedbackMsg) ?>"
@@ -183,7 +183,7 @@ if (isset($_SESSION['predicted_remark'])) {
             <div class="form-group">
                 <label for="student_name">Student Name</label>
                 <input type="text" id="student_name" name="student_name" 
-                       value="<?= htmlspecialchars($inputValues['student_name']) ?>" placeholder="e.g. Pogi Aguiluz" 
+                       value="<?= htmlspecialchars($inputValues['student_name']) ?>" placeholder="e.g. Pogi Omega" 
                        style="width: 100%; padding: 0.75rem 1rem; border-radius: 0.5rem; border: 1px solid var(--border); font-family: inherit; font-size: 1rem; background: #f8fafc;" required>
             </div>
 
@@ -281,7 +281,7 @@ if (isset($_SESSION['predicted_remark'])) {
                         <td><strong><?= number_format($rowTotal, 2) ?></strong></td>
                         <td>
                             <span style="font-weight: 600; color: var(--primary);">
-                                <?= htmlspecialchars($r['predicted_remark']) ?>
+                                <?= htmlspecialchars(isset($r['graded_remark']) ? $r['graded_remark'] : (isset($r['predicted_remark']) ? $r['predicted_remark'] : '')) ?>
                             </span>
                         </td>
                         <td>
